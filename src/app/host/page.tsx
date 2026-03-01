@@ -90,7 +90,11 @@ export default function HostPage() {
     { premio: "Pokino" as const, monto: 15 },
   ];
 
-  const qrValue = `https://pokino.local/player?code=${gameCode}`;
+  // use current origin so QR works both locally and in codespace
+  const qrValue =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/player?code=${gameCode}`
+      : `http://localhost:3000/player?code=${gameCode}`;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-6">
