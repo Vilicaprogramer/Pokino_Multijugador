@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { io } from "socket.io-client";
 import QRCode from "qrcode.react";
 import { motion } from "framer-motion";
 import { VasosPremios } from "@/components/VasosPremios";
@@ -16,14 +17,69 @@ const CARTAS_BARAJA = [
   "6Bastos", "7Bastos", "10Bastos", "SotaBastos", "CaballoBastos",
 ];
 
+interface Player {
+  id: string;
+  nombre: string;
+  avatar: string;
+  saldo: number;
+}
+
 export default function HostPage() {
   const [gameCode] = useState("PKN123");
   const [cartasCantadas, setCartasCantadas] = useState<string[]>([]);
-  const [jugadoresConectados] = useState([
-    { id: 1, nombre: "Juan", avatar: "👨‍🦱", saldo: 95 },
-    { id: 2, nombre: "María", avatar: "👩‍🦰", saldo: 100 },
-    { id: 3, nombre: "Carlos", avatar: "👨‍🦲", saldo: 100 },
-  ]);
+  const [jugadores, setJugadores] = useState<Player[]>([]);
+  const [socket, setSocket] = useState<any>(null);
+  const [conectado, setConectado] = useState(false);
+
+  useEffect(() => {
+    // Conectar al servidor Socket.io usando la misma origen
+    const socketUrl = typeof window !== "undefined"
+      ? `${window.location.protocol}//${window.location.host}`
+      : "";
+    const newSocket = io(socketUrl, {
+      path: "/socket.io",
+      reconnection: true,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+    });
+
+    newSocket.on("connect", () => {
+      console.log("✅ Conectado al servidor");
+      setConectado(true);
+
+      // Notificar que soy Host
+      newSocket.emit("hostJoined", { gameCode });
+    });
+
+    newSocket.on("gameStateUpdated", (state) => {
+      setCartasCantadas(state.cartasCantadas);
+      const playersArray = Object.values(state.players) as Player[];
+      setJugadores(playersArray);
+    });
+
+    newSocket.on("disconnect", () => {
+      console.log("❌ Desconectado del servidor");
+      setConectado(false);
+    });
+
+    setSocket(newSocket);
+
+    return () => {
+      newSocket.disconnect();
+    };
+  }, [gameCode]);
+
+  const cantarCarta = (carta: string) => {
+    if (socket && !cartasCantadas.includes(carta)) {
+      socket.emit("cantarCarta", carta);
+    }
+  };
+
+  const limpiarCartas = () => {
+    if (socket) {
+      socket.emit("limpiarCartas");
+    }
+  };
 
   const vasos = [
     { premio: "Centro" as const, monto: 15 },
@@ -34,16 +90,18 @@ export default function HostPage() {
     { premio: "Pokino" as const, monto: 15 },
   ];
 
-  const cantarCarta = (carta: string) => {
-    if (!cartasCantadas.includes(carta)) {
-      setCartasCantadas([...cartasCantadas, carta]);
-    }
-  };
-
   const qrValue = `https://pokino.local/player?code=${gameCode}`;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-6">
+      {/* Status */}
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-3xl font-bold text-white">🎰 Pokino Live - Host</h1>
+        <div className={`px-4 py-2 rounded-full font-bold ${conectado ? "bg-green-500 text-white" : "bg-red-500 text-white"}`}>
+          {conectado ? "✅ Conectado" : "❌ Desconectando..."}
+        </div>
+      </div>
+
       <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
         
         {/* COLUMNA 1: QR y Código */}
@@ -61,15 +119,24 @@ export default function HostPage() {
           </p>
           
           {/* Lista de Jugadores */}
-          <h3 className="text-lg font-bold text-gray-900 mb-3">Jugadores ({jugadoresConectados.length})</h3>
-          <div className="space-y-2">
-            {jugadoresConectados.map((j) => (
-              <div key={j.id} className="flex items-center justify-between p-3 bg-gray-100 rounded">
-                <span className="text-2xl">{j.avatar}</span>
-                <span className="font-semibold">{j.nombre}</span>
-                <span className="text-green-600 font-bold">{j.saldo} 🪙</span>
-              </div>
-            ))}
+          <h3 className="text-lg font-bold text-gray-900 mb-3">Jugadores ({jugadores.length})</h3>
+          <div className="space-y-2 max-h-96 overflow-y-auto">
+            {jugadores.length === 0 ? (
+              <p className="text-gray-500 text-center py-4">Esperando jugadores...</p>
+            ) : (
+              jugadores.map((j) => (
+                <motion.div 
+                  key={j.id} 
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  className="flex items-center justify-between p-3 bg-gray-100 rounded"
+                >
+                  <span className="text-2xl">{j.avatar}</span>
+                  <span className="font-semibold flex-1 ml-2">{j.nombre}</span>
+                  <span className="text-green-600 font-bold">{j.saldo} 🪙</span>
+                </motion.div>
+              ))
+            )}
           </div>
         </motion.div>
 
@@ -90,8 +157,8 @@ export default function HostPage() {
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-2xl font-bold text-gray-900">🃏 Cartas Cantadas ({cartasCantadas.length})</h2>
               <button
-                onClick={() => setCartasCantadas([])}
-                className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600"
+                onClick={limpiarCartas}
+                className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition"
               >
                 Limpiar
               </button>
@@ -99,9 +166,14 @@ export default function HostPage() {
             <div className="h-24 bg-gray-100 rounded-lg p-3 overflow-y-auto">
               <div className="flex flex-wrap gap-2">
                 {cartasCantadas.map((carta, idx) => (
-                  <div key={idx} className="bg-blue-500 text-white px-3 py-1 rounded">
+                  <motion.div 
+                    key={idx} 
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    className="bg-blue-500 text-white px-3 py-1 rounded font-semibold"
+                  >
                     {carta}
-                  </div>
+                  </motion.div>
                 ))}
               </div>
             </div>
